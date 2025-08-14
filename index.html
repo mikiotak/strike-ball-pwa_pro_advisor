@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>数当てゲーム — Pro Advisor (PWA)</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0a7">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  html, body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif; }
+  body { margin: 24px; line-height: 1.6; background:#f6f7f9; }
+  .app { max-width: 680px; margin: 0 auto; background:#fff; padding:20px; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  .muted{ color:#666; font-size:.95rem; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  input[type=text] { width:7.5em; font-size:1.1rem; padding:8px 10px; border:1px solid #ddd; border-radius:8px; }
+  button { padding:9px 14px; font-size:1rem; border:0; border-radius:10px; cursor:pointer; background:#0a7; color:#fff; }
+  button.secondary{ background:#e9eef5; color:#213; }
+  .hint { background:#fff8cc; padding:8px 10px; border-radius:8px; }
+  #log { white-space: pre-wrap; background:#f5f7fb; padding:10px; border-radius:8px; min-height:3em; }
+  .advisor { background:#eefaf5; padding:8px 10px; border-radius:8px; }
+  .footer { margin-top:14px; display:flex; gap:8px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>数当てゲーム — Pro Advisor</h1>
+  <p class="muted">0〜9の異なる4つで作られた秘密番号を当てます（重複なし）。<br>
+  5回外すと<strong>最初の数字ヒント</strong>が出ます。<br>
+  「次の一手アシスト」は情報量が最大になる手を提案します。</p>
+
+  <div class="row">
+    <label>推測：</label>
+    <input type="text" id="guess" inputmode="numeric" maxlength="4" placeholder="例: 1234">
+    <button id="btnGo">判定</button>
+    <button id="btnAdv" class="secondary">次の一手アシスト</button>
+    <button id="btnGive" class="secondary">ギブアップ</button>
+  </div>
+
+  <p id="msg" class="muted"></p>
+  <p id="hint" class="hint"></p>
+  <div class="advisor" id="advisor"></div>
+
+  <h3>履歴</h3>
+  <div id="log"></div>
+
+  <div class="footer">
+    <button id="btnRestart" class="secondary">新しいゲーム</button>
+  </div>
+</div>
+
+<script>
+// ---- Core helpers ----
+let allCodes = [];
+(function genAll(){
+  const d = "0123456789";
+  for(let a=0;a<10;a++) for(let b=0;b<10;b++) if(b!==a)
+  for(let c=0;c<10;c++) if(c!==a&&c!==b)
+  for(let e=0;e<10;e++) if(e!==a&&e!==b&&e!==c)
+    allCodes.push(d[a]+d[b]+d[c]+d[e]);
+})();
+
+function isValidCode(s){ return /^\d{4}$/.test(s) && new Set(s).size===4; }
+function scoreSB(g, s){
+  let S=0,B=0;
+  for(let i=0;i<4;i++){ if(g[i]===s[i]) S++; else if(s.includes(g[i])) B++; }
+  return [S,B];
+}
+function filterPool(pool, g, S, B){
+  return pool.filter(c=>{ const [s2,b2]=scoreSB(g,c); return s2===S && b2===B; });
+}
+
+// ---- Game state ----
+let secret="", attempts=0, gameOver=false, hintShown=false;
+function startGame(){
+  secret = allCodes[Math.floor(Math.random()*allCodes.length)];
+  attempts=0; gameOver=false; hintShown=false;
+  $("log").textContent=""; $("hint").textContent=""; $("advisor").textContent="";
+  $("msg").textContent="CPUの秘密を当ててください。";
+  $("guess").value=""; $("guess").focus();
+}
+
+// ---- Advisor ----
+function recommendNext(history){
+  // build candidate pool from history
+  let pool = allCodes.slice();
+  for(const h of history){ pool = filterPool(pool, h.g, h.S, h.B); }
+  if(pool.length===0) return {pool:0, best:null, exp:0};
+
+  // Evaluate expected remaining size for a sample (or full if small)
+  const evalSet = pool.length<=220 ? pool : pool.slice(0,220);
+  let best=null, bestExp=Infinity;
+  for(const g of evalSet){
+    const counts = new Map();
+    for(const s of pool){
+      const k = scoreSB(g,s).join(",");
+      counts.set(k, (counts.get(k)||0)+1);
+    }
+    let exp=0;
+    for(const sz of counts.values()) exp += sz*sz;
+    exp /= pool.length;
+    if(exp < bestExp){ bestExp=exp; best=g; }
+  }
+  return {pool:pool.length, best, exp:Math.round(bestExp)};
+}
+
+// ---- UI ----
+function $(id){ return document.getElementById(id); }
+
+function parseHistory(){
+  const lines = $("log").textContent.trim().split("\n").filter(Boolean);
+  const hs = [];
+  for(const line of lines){
+    // "1回目: 1234 → 1S 2B"
+    const m = line.match(/:\s(\d{4})\s→\s(\d)S\s(\d)B/);
+    if(m){ hs.push({g:m[1], S:+m[2], B:+m[3]}); }
+  }
+  return hs;
+}
+
+function onJudge(){
+  if(gameOver) return;
+  const g = $("guess").value.trim();
+  if(!isValidCode(g)){ $("msg").textContent="4桁の重複なしで入力してください。"; return; }
+  attempts++;
+  const [S,B] = scoreSB(g, secret);
+  $("log").textContent += `${attempts}回目: ${g} → ${S}S ${B}B\n`;
+  if(S===4){ $("msg").textContent="🎉 正解！あなたの勝ち"; gameOver=true; return; }
+  $("msg").textContent = `${S}ストライク / ${B}ボール`;
+  if(attempts>=5 && !hintShown){ $("hint").textContent=`ヒント：最初の数字は ${secret[0]}`; hintShown=true; }
+  // update advisor
+  const rec = recommendNext(parseHistory());
+  $("advisor").textContent = rec.best ? `候補 ${rec.pool} 通り → 次の手: ${rec.best}（期待残り≈${rec.exp}）` : "";
+  $("guess").value=""; $("guess").focus();
+}
+
+function onAdvisor(){
+  const rec = recommendNext(parseHistory());
+  $("advisor").textContent = rec.best ? `候補 ${rec.pool} 通り → 次の手: ${rec.best}（期待残り≈${rec.exp}）` : "候補を計算できませんでした";
+  if(rec.best) $("guess").value = rec.best;
+}
+
+function onGiveUp(){
+  if(gameOver) return;
+  gameOver=true;
+  $("msg").textContent = `ギブアップ！負けです。秘密は ${secret} でした。`;
+  $("hint").textContent = "";
+}
+
+$("btnGo").addEventListener("click", onJudge);
+$("guess").addEventListener("keydown", e=>{ if(e.key==="Enter") onJudge(); });
+$("btnAdv").addEventListener("click", onAdvisor);
+$("btnGive").addEventListener("click", onGiveUp);
+$("btnRestart").addEventListener("click", startGame);
+
+// PWA: register service worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').catch(console.error);
+  });
+}
+
+startGame();
+</script>
+</body>
+</html>
