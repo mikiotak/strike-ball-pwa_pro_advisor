@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sb-pro-cache-v1';
+const CACHE_NAME = 'sb-pro-cache-v2';
 const ASSETS = [
   './',
   './index.html',

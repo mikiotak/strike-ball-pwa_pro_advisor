@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>数当てゲーム — Pro Advisor (PWA)</title>
+<title>数当てゲーム — Pro Advisor (PWA/手動アドバイス)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0a7">
 <link rel="apple-touch-icon" href="icon-180.png">
@@ -25,10 +25,10 @@
 </head>
 <body>
 <div class="app">
-  <h1>数当てゲーム — Pro Advisor</h1>
+  <h1>数当てゲーム — Pro Advisor（手動表示）</h1>
   <p class="muted">0〜9の異なる4つで作られた秘密番号を当てます（重複なし）。<br>
   5回外すと<strong>最初の数字ヒント</strong>が出ます。<br>
-  「次の一手アシスト」は情報量が最大になる手を提案します。</p>
+  「次の一手アシスト」は<strong>ボタンを押した時のみ</strong>表示します。</p>
 
   <div class="row">
     <label>推測：</label>
@@ -51,7 +51,6 @@
 </div>
 
 <script>
-// ---- Core helpers ----
 let allCodes = [];
 (function genAll(){
   const d = "0123456789";
@@ -71,7 +70,6 @@ function filterPool(pool, g, S, B){
   return pool.filter(c=>{ const [s2,b2]=scoreSB(g,c); return s2===S && b2===B; });
 }
 
-// ---- Game state ----
 let secret="", attempts=0, gameOver=false, hintShown=false;
 function startGame(){
   secret = allCodes[Math.floor(Math.random()*allCodes.length)];
@@ -81,14 +79,10 @@ function startGame(){
   $("guess").value=""; $("guess").focus();
 }
 
-// ---- Advisor ----
 function recommendNext(history){
-  // build candidate pool from history
   let pool = allCodes.slice();
   for(const h of history){ pool = filterPool(pool, h.g, h.S, h.B); }
   if(pool.length===0) return {pool:0, best:null, exp:0};
-
-  // Evaluate expected remaining size for a sample (or full if small)
   const evalSet = pool.length<=220 ? pool : pool.slice(0,220);
   let best=null, bestExp=Infinity;
   for(const g of evalSet){
@@ -97,22 +91,17 @@ function recommendNext(history){
       const k = scoreSB(g,s).join(",");
       counts.set(k, (counts.get(k)||0)+1);
     }
-    let exp=0;
-    for(const sz of counts.values()) exp += sz*sz;
-    exp /= pool.length;
+    let exp=0; for(const sz of counts.values()) exp += sz*sz; exp /= pool.length;
     if(exp < bestExp){ bestExp=exp; best=g; }
   }
   return {pool:pool.length, best, exp:Math.round(bestExp)};
 }
 
-// ---- UI ----
 function $(id){ return document.getElementById(id); }
-
 function parseHistory(){
   const lines = $("log").textContent.trim().split("\n").filter(Boolean);
   const hs = [];
   for(const line of lines){
-    // "1回目: 1234 → 1S 2B"
     const m = line.match(/:\s(\d{4})\s→\s(\d)S\s(\d)B/);
     if(m){ hs.push({g:m[1], S:+m[2], B:+m[3]}); }
   }
@@ -129,9 +118,8 @@ function onJudge(){
   if(S===4){ $("msg").textContent="🎉 正解！あなたの勝ち"; gameOver=true; return; }
   $("msg").textContent = `${S}ストライク / ${B}ボール`;
   if(attempts>=5 && !hintShown){ $("hint").textContent=`ヒント：最初の数字は ${secret[0]}`; hintShown=true; }
-  // update advisor
-  const rec = recommendNext(parseHistory());
-  $("advisor").textContent = rec.best ? `候補 ${rec.pool} 通り → 次の手: ${rec.best}（期待残り≈${rec.exp}）` : "";
+  // ★自動表示しない
+  $("advisor").textContent="";
   $("guess").value=""; $("guess").focus();
 }
 
@@ -154,7 +142,7 @@ $("btnAdv").addEventListener("click", onAdvisor);
 $("btnGive").addEventListener("click", onGiveUp);
 $("btnRestart").addEventListener("click", startGame);
 
-// PWA: register service worker
+// PWA
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./service-worker.js').catch(console.error);

@@ -1,5 +1,5 @@
 {
-  "name": "数当てゲーム — Pro Advisor",
+  "name": "数当てゲーム — Pro Advisor（手動表示）",
   "short_name": "数当てPro",
   "start_url": ".",
   "display": "standalone",
